@@ -1,0 +1,141 @@
+---
+title: "Project of Coursera's Practical Machine Learning"
+author: "Silvia Bahmann"
+date: "20.09.2015"
+output: html_document
+---
+
+## Scope of work
+(Was copied from the assignment page!)
+
+### Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset) [1]. 
+
+### Data 
+
+The training data for this project are available here: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment. 
+
+
+### Task
+
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases. 
+
+
+## Data exploration
+
+```{r message = FALSE}
+# Loading libraries
+library(caret) # machine learning
+library(doMC) # parallel processing
+
+# Load training and testing data
+trainset <- read.csv("pml-training.csv", na.strings = c("NA", "#DIV/0!", ""))
+testset <- read.csv("pml-testing.csv", na.strings = c("NA", "#DIV/0!", ""))
+dim(trainset)
+dim(testset)
+table(trainset$classe)
+```
+
+The `classe` variable denotes how the participants executed the "Unilateral Dumbbell Biceps Curls" (from [1], more information in [2]):
+
+- exactly according to the specification (Class A)
+- throwing the elbows to the front (Class B)
+- lifting the dumbbell only halfway (Class C)
+- lowering the dumbbell only halfway (Class D)
+- throwing the hips to the front (Class E).
+
+The frequencies of the classes are all in the same order of magnitude, i.e. there is no classe underrepresented which would make prediction difficult.
+
+As figure 1 shows, there are about 100 columns that each contain more than 19000 NAs in only 19622 observations. The number of NAs in the rows is either 0 or very large. Thus, only columns without NAs are useful for building the model.
+
+```{r cache = TRUE}
+hist(colSums(is.na(trainset)), breaks = 20,
+     xlab = "Number of NAs per column", main = "Figure 1: Histogram of NAs in rows")
+table(colSums(is.na(trainset)))
+```
+
+
+## Preprocessing
+
+First of all, only the columns with no NAs are taken into account for further analysis. In addition, the first seven columns containing timestamps or user information are removed as well. These and other possibilities of preprocessing options with R can be found here [3]. 
+
+```{r}
+# take only columns with no NAs
+trainset <- trainset[, colSums(is.na(trainset)) == 0]
+names(trainset)
+trainset <- trainset[, c(8:60)]
+```
+
+For allowing for cross-validation of the respective model, the `trainset` was split as the `testset` must not be used for optimizing the model. 80% were used for training the model and 20% for cross-validation.
+
+```{r}
+set.seed(123)
+splitTrain <- createDataPartition(trainset$classe, p = 0.8, list = FALSE)
+trainTrain <- trainset[splitTrain, ]
+trainTest <- trainset[-splitTrain, ]
+```
+
+## Building the model
+
+Two models are proposed for building the prediction model - `rpart` (classification tree) and `rf` (random forest). According to the Coursera lectures,  these have a good performance in non-linear settings.
+
+Cross-validation makes it possible to compare different models by training the model on the `trainTrain` set and evaluating its accuracy on the `testTrain` set.
+
+### First model: Predicting with Decision Tree
+```{r cache = TRUE, message = FALSE}
+rpart.model <- rpart(classe ~ ., trainTrain, method = "class")
+rpart.predict <- predict(rpart.model, trainTest, type = "class")
+confusionMatrix(rpart.predict, trainTest$classe)
+```
+
+### Second model: Predicting with Random Forest
+
+For training the random forest model parallel execution was enabled.
+
+```{r cache = TRUE, message = FALSE}
+registerDoMC(cores = 4)
+rf.model <- train(classe ~ ., trainTrain, method = "rf")
+rf.predict <- predict(rf.model, trainTest)
+confusionMatrix(rf.predict, trainTest$classe)
+```
+
+## Results and test set prediction
+
+The two models yield different accuracies on the `trainTest` set:
+
+- Decision Tree: 0.7545
+- Random Forests: 0.9941
+
+As the Random Forest model shows to be by far more accurate in cross-validation, it is chosen for predicting the test set. The out-of-sample error is 0.0059 or 0.59%. Building the Random forest model is computationally expensive. The choice to favour the random forest model was made because of its superior accuracy.
+
+In the last step of the assignment, the `classe` of the test set was predicted:
+
+```{r message = FALSE}
+# use model on testset
+answers <- predict(rf.model, testset)
+answers
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(answers)
+```
+
+## References
+[1] http://groupware.les.inf.puc-rio.br/har#weight_lifting_exercises
+[2] Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+[3] http://topepo.github.io/caret/preprocess.html
+
+
